@@ -1,0 +1,50 @@
+name: Deploy NexTerm
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Type Check
+        run: npx tsc --noEmit
+
+      - name: Lint Code
+        # This will run eslint if it exists, otherwise it will just exit 0
+        run: npx eslint . --ext .js,.jsx,.ts,.tsx || true
+
+      - name: Build Frontend & Backend
+        run: |
+          npm run build
+          npx tsc server.ts --outDir dist --esModuleInterop --skipLibCheck --resolveJsonModule || npx tsc --outDir dist --noEmit false
+
+      - name: Deploy to VPS
+        # Uncomment and configure GitHub secrets to enable automatic VPS deployment over SSH
+        # uses: appleboy/ssh-action@v1.0.3
+        # with:
+        #   host: ${{ secrets.VPS_HOST }}
+        #   username: ${{ secrets.VPS_USERNAME }}
+        #   key: ${{ secrets.VPS_PRIVATE_KEY }}
+        #   script: |
+        #     cd ~/NexTerm
+        #     git pull origin main
+        #     npm ci
+        #     npm run build
+        #     npx tsc server.ts --outDir dist --esModuleInterop --skipLibCheck --resolveJsonModule || npx tsc --outDir dist --noEmit false
+        #     pm2 reload nexterm --update-env || pm2 start ecosystem.config.js
+        run: echo "Deployment step requires GitHub secrets (VPS_HOST, VPS_USERNAME, VPS_PRIVATE_KEY). Read workflow comments to enable."

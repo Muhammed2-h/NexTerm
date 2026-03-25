@@ -58,14 +58,16 @@ export function detectEnvironment(): EnvironmentCapabilities {
       else if (cgroup.includes('lxc')) envType = 'lxc';
     } catch (e) {}
   }
-  
+
   if (envType === 'unknown') {
     try {
-      const dmesg = execSync('dmesg | grep -i hypervisor 2>/dev/null', { stdio: 'pipe' }).toString();
+      const dmesg = execSync('dmesg | grep -i hypervisor 2>/dev/null', {
+        stdio: 'pipe',
+      }).toString();
       if (dmesg) envType = 'vps';
     } catch (e) {}
   }
-  
+
   caps.environmentType = envType;
 
   // Systemd
@@ -97,7 +99,7 @@ export function detectEnvironment(): EnvironmentCapabilities {
 
   // Package managers
   const pkgManagers = ['apt-get', 'apk', 'yum', 'dnf', 'pacman'];
-  caps.canInstallPackages = pkgManagers.some(pm => {
+  caps.canInstallPackages = pkgManagers.some((pm) => {
     try {
       execSync(`which ${pm} 2>/dev/null`, { stdio: 'pipe' });
       return true;

@@ -1,7 +1,17 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Server, Shield, Cpu, Network, Package, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
+import {
+  X,
+  Server,
+  Shield,
+  Cpu,
+  Network,
+  Package,
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
+} from 'lucide-react';
 import { useStore } from '../store/useStore';
 
 interface Props {
@@ -16,7 +26,11 @@ export const CapabilitiesModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
   const renderStatus = (condition: boolean, text: string) => (
     <div className="flex items-center gap-2 text-sm">
-      {condition ? <CheckCircle2 size={16} className="text-green-400" /> : <XCircle size={16} className="text-red-400" />}
+      {condition ? (
+        <CheckCircle2 size={16} className="text-green-400" />
+      ) : (
+        <XCircle size={16} className="text-red-400" />
+      )}
       <span className={condition ? 'text-zinc-200' : 'text-zinc-500'}>{text}</span>
     </div>
   );
@@ -36,13 +50,15 @@ export const CapabilitiesModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 <Server size={18} className="text-blue-400" />
                 Environment Capabilities
               </h2>
-              <button onClick={onClose} className="p-1 text-zinc-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors">
+              <button
+                onClick={onClose}
+                className="p-1 text-zinc-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+              >
                 <X size={20} />
               </button>
             </div>
 
             <div className="p-6 overflow-y-auto space-y-8 custom-scrollbar flex-1">
-              
               {/* System Info */}
               <section>
                 <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-4 flex items-center gap-2">
@@ -51,19 +67,27 @@ export const CapabilitiesModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-white/5 p-3 rounded-xl border border-white/5">
                     <div className="text-xs text-zinc-500 mb-1">OS / Distro</div>
-                    <div className="text-sm font-medium text-zinc-200 truncate">{capabilities.osDistro}</div>
+                    <div className="text-sm font-medium text-zinc-200 truncate">
+                      {capabilities.osDistro}
+                    </div>
                   </div>
                   <div className="bg-white/5 p-3 rounded-xl border border-white/5">
                     <div className="text-xs text-zinc-500 mb-1">Kernel</div>
-                    <div className="text-sm font-medium text-zinc-200 truncate">{capabilities.kernelVersion}</div>
+                    <div className="text-sm font-medium text-zinc-200 truncate">
+                      {capabilities.kernelVersion}
+                    </div>
                   </div>
                   <div className="bg-white/5 p-3 rounded-xl border border-white/5">
                     <div className="text-xs text-zinc-500 mb-1">Architecture</div>
-                    <div className="text-sm font-medium text-zinc-200 truncate">{capabilities.architecture}</div>
+                    <div className="text-sm font-medium text-zinc-200 truncate">
+                      {capabilities.architecture}
+                    </div>
                   </div>
                   <div className="bg-white/5 p-3 rounded-xl border border-white/5">
                     <div className="text-xs text-zinc-500 mb-1">Environment Type</div>
-                    <div className="text-sm font-medium text-blue-400 uppercase tracking-wider">{capabilities.environmentType}</div>
+                    <div className="text-sm font-medium text-blue-400 uppercase tracking-wider">
+                      {capabilities.environmentType}
+                    </div>
                   </div>
                 </div>
               </section>
@@ -119,7 +143,10 @@ export const CapabilitiesModal: React.FC<Props> = ({ isOpen, onClose }) => {
                   </h3>
                   <div className="space-y-2">
                     {capabilities.notes.map((note, idx) => (
-                      <div key={idx} className="flex items-start gap-3 bg-yellow-500/10 border border-yellow-500/20 p-3 rounded-xl text-sm text-yellow-200/80">
+                      <div
+                        key={idx}
+                        className="flex items-start gap-3 bg-yellow-500/10 border border-yellow-500/20 p-3 rounded-xl text-sm text-yellow-200/80"
+                      >
                         <AlertTriangle size={16} className="shrink-0 mt-0.5 text-yellow-500/50" />
                         <p>{note}</p>
                       </div>
@@ -127,12 +154,11 @@ export const CapabilitiesModal: React.FC<Props> = ({ isOpen, onClose }) => {
                   </div>
                 </section>
               )}
-
             </div>
           </motion.div>
         </div>
       )}
     </AnimatePresence>,
-    document.body
+    document.body,
   );
 };

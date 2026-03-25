@@ -48,25 +48,31 @@ export const useStore = create<AppState>((set) => ({
   sessions: [],
   activeSessionId: null,
   capabilities: null,
-  setSessions: (sessions) => set({ sessions, activeSessionId: sessions.length > 0 ? sessions[0].id : null }),
-  addSession: (name) => set((state) => {
-    const id = Math.random().toString(36).substring(7);
-    const newSession: Session = { id, name, status: 'disconnected', logs: [] };
-    return {
-      sessions: [...state.sessions, newSession],
-      activeSessionId: id,
-    };
-  }),
-  removeSession: (id) => set((state) => ({
-    sessions: state.sessions.filter((s) => s.id !== id),
-    activeSessionId: state.activeSessionId === id ? (state.sessions[0]?.id || null) : state.activeSessionId,
-  })),
+  setSessions: (sessions) =>
+    set({ sessions, activeSessionId: sessions.length > 0 ? sessions[0].id : null }),
+  addSession: (name) =>
+    set((state) => {
+      const id = Math.random().toString(36).substring(7);
+      const newSession: Session = { id, name, status: 'disconnected', logs: [] };
+      return {
+        sessions: [...state.sessions, newSession],
+        activeSessionId: id,
+      };
+    }),
+  removeSession: (id) =>
+    set((state) => ({
+      sessions: state.sessions.filter((s) => s.id !== id),
+      activeSessionId:
+        state.activeSessionId === id ? state.sessions[0]?.id || null : state.activeSessionId,
+    })),
   setActiveSession: (id) => set({ activeSessionId: id }),
-  updateSessionStatus: (id, status) => set((state) => ({
-    sessions: state.sessions.map((s) => s.id === id ? { ...s, status } : s),
-  })),
-  appendLog: (id, log) => set((state) => ({
-    sessions: state.sessions.map((s) => s.id === id ? { ...s, logs: [...s.logs, log] } : s),
-  })),
+  updateSessionStatus: (id, status) =>
+    set((state) => ({
+      sessions: state.sessions.map((s) => (s.id === id ? { ...s, status } : s)),
+    })),
+  appendLog: (id, log) =>
+    set((state) => ({
+      sessions: state.sessions.map((s) => (s.id === id ? { ...s, logs: [...s.logs, log] } : s)),
+    })),
   setCapabilities: (caps) => set({ capabilities: caps }),
 }));

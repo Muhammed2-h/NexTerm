@@ -1,0 +1,10 @@
+node_modules
+.git
+.github
+dist
+npm-debug.log
+.env.local
+.env.development
+.env.test
+.env.production
+sessions

@@ -1,7 +1,9 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
+import { SearchAddon } from '@xterm/addon-search';
+import { ClipboardAddon } from '@xterm/addon-clipboard';
 import 'xterm/css/xterm.css';
 import { useStore } from '../store/useStore';
 
@@ -50,11 +52,28 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
     });
 
     const fitAddon = new FitAddon();
+    const searchAddon = new SearchAddon();
+    const clipboardAddon = new ClipboardAddon();
+
     term.loadAddon(fitAddon);
     term.loadAddon(new WebLinksAddon());
+    term.loadAddon(searchAddon);
+    term.loadAddon(clipboardAddon);
+
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.ctrlKey && e.code === 'KeyF' && e.type === 'keydown') {
+        e.preventDefault();
+        const searchInput = prompt('Search Terminal Buffer:');
+        if (searchInput) {
+          searchAddon.findNext(searchInput);
+        }
+        return false;
+      }
+      return true;
+    });
 
     term.open(terminalRef.current);
-    
+
     let initTimeout: ReturnType<typeof setTimeout>;
     let rafId: number;
     let isDisposed = false;
@@ -66,11 +85,13 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
 
     ws.onopen = () => {
       updateStatus(sessionId, 'connecting');
-      ws.send(JSON.stringify({
-        type: 'connect',
-        sessionId: sessionId,
-        payload: { type: 'local' }
-      }));
+      ws.send(
+        JSON.stringify({
+          type: 'connect',
+          sessionId: sessionId,
+          payload: { type: 'local' },
+        }),
+      );
     };
 
     ws.onmessage = (event) => {
@@ -79,7 +100,7 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
         const data = JSON.parse(event.data);
         if (data.type === 'data') {
           term.write(atob(data.payload));
-          
+
           // Trigger subtle data pulse animation
           if (wrapperRef.current) {
             wrapperRef.current.classList.remove('animate-data-pulse');
@@ -114,8 +135,14 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
 
     const handleResize = () => {
       try {
-        if (isDisposed || !terminalRef.current || terminalRef.current.clientWidth === 0 || !term.element) return;
-        
+        if (
+          isDisposed ||
+          !terminalRef.current ||
+          terminalRef.current.clientWidth === 0 ||
+          !term.element
+        )
+          return;
+
         // Explicitly check if renderService and dimensions are available before fitting
         const core = (term as any)._core;
         if (!core || !core._renderService || !core._renderService.dimensions) return;
@@ -128,10 +155,12 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
         }
 
         if (ws.readyState === WebSocket.OPEN && !isDisposed) {
-          ws.send(JSON.stringify({
-            type: 'resize',
-            payload: { cols: term.cols, rows: term.rows }
-          }));
+          ws.send(
+            JSON.stringify({
+              type: 'resize',
+              payload: { cols: term.cols, rows: term.rows },
+            }),
+          );
         }
       } catch (e) {
         console.warn('Resize error', e);
@@ -166,7 +195,10 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
   }, [sessionId]);
 
   return (
-    <div ref={wrapperRef} className="absolute inset-0 p-2 overflow-hidden transition-colors duration-300">
+    <div
+      ref={wrapperRef}
+      className="absolute inset-0 p-2 overflow-hidden transition-colors duration-300"
+    >
       <div ref={terminalRef} className="w-full h-full relative z-20" />
       <div className="scanlines" />
     </div>

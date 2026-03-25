@@ -1,227 +1,88 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import { WebSocketServer, WebSocket } from 'ws';
-import { spawn, execSync, ChildProcess } from 'child_process';
+import { spawn, execFileSync, ChildProcess } from 'child_process';
 import path from 'path';
 import cors from 'cors';
 import { detectEnvironment } from './envDetector';
+import 'dotenv/config'; // Enable process.env parsing from .env
+import crypto from 'crypto';
+import fs from 'fs';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import pino from 'pino';
+import { z } from 'zod';
+// Setup basic audit logging
+const logger = pino ? pino({ level: 'info' }) : (console as any);
+
+// VULN 2 FIX: Terminal running as root
+if (process.getuid && process.getuid() === 0) {
+  if (!process.argv.includes('--allow-root')) {
+    logger.error('CRITICAL WARNING: Running terminal as root is extremely dangerous!');
+    logger.error(
+      'Please restart the application as a non-root user, or pass --allow-root to bypass this check.',
+    );
+    process.exit(1);
+  }
+  logger.warn('WARNING: Running as root (--allow-root provided). This is a severe security risk.');
+}
+
+// VULN 1 FIX: Setup Secret Token for Auth
+let SECRET_TOKEN = process.env.SECRET_TOKEN as string;
+if (!SECRET_TOKEN) {
+  SECRET_TOKEN = crypto.randomBytes(32).toString('hex');
+  const envPath = path.join(process.cwd(), '.env.local');
+  fs.appendFileSync(envPath, `\nSECRET_TOKEN=${SECRET_TOKEN}\n`);
+  logger.info(`[SECURITY] Generated new SECRET_TOKEN and saved to .env.local: ${SECRET_TOKEN}`);
+}
 
 const PORT = 3000;
 
-// Session Manager to handle persistence across browser reloads
-class SessionManager {
-  private sessions: Map<string, { pty: ChildProcess, history: Buffer[], ws: WebSocket | null }> = new Map();
-  private hasTmux = false;
+import { SessionManager } from './src/sessionManager';
+import { createApiRouter } from './src/routes/api';
 
-  constructor() {
-    try {
-      execSync('which tmux 2>/dev/null');
-      this.hasTmux = true;
-    } catch (e) {
-      this.hasTmux = false;
-    }
-  }
-
-  public getOrCreateSession(sessionId: string, ws: WebSocket) {
-    if (this.hasTmux) {
-      return this.getOrCreateTmuxSession(sessionId, ws);
-    } else {
-      return this.getOrCreateMemorySession(sessionId, ws);
-    }
-  }
-
-  private getOrCreateTmuxSession(sessionId: string, ws: WebSocket) {
-    const safeId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_');
-    
-    let sessionExists = false;
-    try {
-      execSync(`tmux has-session -t ${safeId} 2>/dev/null`);
-      sessionExists = true;
-    } catch (e) {
-      sessionExists = false;
-    }
-
-    let ptyProcess: ChildProcess;
-
-    if (sessionExists) {
-      ptyProcess = spawn('python3', ['-c', `import pty; pty.spawn(["tmux", "attach-session", "-t", "${safeId}"])`], {
-        env: { ...process.env, TERM: 'xterm-256color' }
-      });
-      ws.send(JSON.stringify({ type: 'status', payload: `\r\nReattached to tmux session: ${safeId}\r\n` }));
-    } else {
-      ptyProcess = spawn('python3', ['-c', `import os; os.environ["PS1"] = "root@localhost:\\\\w# "; import pty; pty.spawn(["tmux", "new-session", "-A", "-s", "${safeId}", "/bin/bash --norc --noprofile"])`], {
-        env: { ...process.env, TERM: 'xterm-256color' }
-      });
-      ws.send(JSON.stringify({ type: 'status', payload: '' }));
-    }
-
-    // For tmux, we just spawn a new client process every time, so we can just attach events directly to this process.
-    this.attachPtyEvents(ptyProcess, ws, sessionId, false);
-    return ptyProcess;
-  }
-
-  private getOrCreateMemorySession(sessionId: string, ws: WebSocket) {
-    let session = this.sessions.get(sessionId);
-
-    if (session) {
-      ws.send(JSON.stringify({ type: 'status', payload: `\r\nReattached to memory session: ${sessionId}\r\n` }));
-      
-      const historyBuffer = Buffer.concat(session.history);
-      if (historyBuffer.length > 0) {
-        ws.send(JSON.stringify({ type: 'data', payload: historyBuffer.toString('base64') }));
-      }
-      
-      session.ws = ws;
-    } else {
-      const ptyProcess = spawn('python3', ['-c', 'import os; os.environ["PS1"] = "root@localhost:\\\\w# "; import pty; pty.spawn(["/bin/bash", "--norc", "--noprofile"])'], {
-        env: { ...process.env, TERM: 'xterm-256color' }
-      });
-      
-      session = { pty: ptyProcess, history: [], ws };
-      this.sessions.set(sessionId, session);
-      ws.send(JSON.stringify({ type: 'status', payload: '' }));
-      
-      this.attachPtyEvents(ptyProcess, ws, sessionId, true);
-    }
-
-    return session.pty;
-  }
-
-  public attachPtyEvents(ptyProcess: ChildProcess, ws: WebSocket, sessionId: string, isMemory: boolean) {
-    const onData = (chunk: Buffer) => {
-      if (isMemory) {
-        const session = this.sessions.get(sessionId);
-        if (session) {
-          session.history.push(chunk);
-          if (session.history.length > 100) session.history.shift();
-          if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-            session.ws.send(JSON.stringify({ type: 'data', payload: chunk.toString('base64') }));
-          }
-        }
-      } else {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'data', payload: chunk.toString('base64') }));
-        }
-      }
-    };
-
-    ptyProcess.stdout?.on('data', onData);
-    ptyProcess.stderr?.on('data', onData);
-
-    ptyProcess.on('close', (code: number) => {
-      if (isMemory) {
-        const session = this.sessions.get(sessionId);
-        if (session && session.ws && session.ws.readyState === WebSocket.OPEN) {
-          session.ws.send(JSON.stringify({ type: 'status', payload: `\r\nTerminal exited with code ${code}\r\n` }));
-        }
-        this.sessions.delete(sessionId);
-      } else {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'status', payload: `\r\nTerminal exited with code ${code}\r\n` }));
-        }
-      }
-    });
-
-    ptyProcess.on('error', (err: Error) => {
-      if (isMemory) {
-        const session = this.sessions.get(sessionId);
-        if (session && session.ws && session.ws.readyState === WebSocket.OPEN) {
-          session.ws.send(JSON.stringify({ type: 'error', payload: `\r\nFailed to start terminal: ${err.message}\r\n` }));
-        }
-        this.sessions.delete(sessionId);
-      } else {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'error', payload: `\r\nFailed to start terminal: ${err.message}\r\n` }));
-        }
-      }
-    });
-  }
-
-  public getActiveSessions() {
-    if (this.hasTmux) {
-      try {
-        const output = execSync('tmux list-sessions -F "#{session_name}" 2>/dev/null').toString();
-        return output.split('\n').filter(Boolean).map(id => ({ id, name: `Terminal ${id.replace('session_', '')}` }));
-      } catch (e) {
-        return [];
-      }
-    } else {
-      return Array.from(this.sessions.keys()).map(id => ({ id, name: `Terminal ${id.replace('session_', '')}` }));
-    }
-  }
-
-  public hasTmuxSession(sessionId: string) {
-    if (!this.hasTmux) return false;
-    const safeId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_');
-    try {
-      execSync(`tmux has-session -t ${safeId} 2>/dev/null`);
-      return true;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  public hasMemorySession(sessionId: string) {
-    return this.sessions.has(sessionId);
-  }
-
-  public killSession(sessionId: string) {
-    if (this.hasTmux) {
-      const safeId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_');
-      try {
-        execSync(`tmux kill-session -t ${safeId} 2>/dev/null`);
-      } catch (e) {
-        // ignore
-      }
-    }
-    
-    const session = this.sessions.get(sessionId);
-    if (session) {
-      session.pty.kill();
-      this.sessions.delete(sessionId);
-    }
-  }
-}
-
-const sessionManager = new SessionManager();
+const sessionManager = new SessionManager(logger);
 
 async function startServer() {
   const app = express();
-  
-  app.use(cors());
+
+  // VULN 6 FIX: CSP and Security Headers
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          connectSrc: ["'self'", 'ws://localhost:3000', 'wss://localhost:3000'],
+          styleSrc: ["'self'", "'unsafe-inline'"], // xterm.js needs inline styles
+        },
+      },
+    }),
+  );
+
+  // VULN 3 FIX: Replace open CORS
+  app.use(
+    cors({
+      origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'],
+    }),
+  );
   app.use(express.json());
 
+  // VULN 5 FIX: API Rate Limiter
+  const apiLimiter = rateLimit({ windowMs: 60_000, max: 100, message: 'Too many requests' });
+  app.use('/api', apiLimiter);
+
+  // VULN 1 FIX: Protect API routes
+  app.use('/api', (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (authHeader !== `Bearer ${SECRET_TOKEN}`) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    next();
+  });
+
   // API routes
-  app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok' });
-  });
-
-  app.get('/api/capabilities', (req, res) => {
-    try {
-      const caps = detectEnvironment();
-      res.json(caps);
-    } catch (e) {
-      res.status(500).json({ error: 'Failed to detect environment capabilities' });
-    }
-  });
-
-  app.get('/api/sessions', (req, res) => {
-    try {
-      const sessions = sessionManager.getActiveSessions();
-      res.json(sessions);
-    } catch (e) {
-      res.status(500).json({ error: 'Failed to get sessions' });
-    }
-  });
-
-  app.delete('/api/sessions/:id', (req, res) => {
-    try {
-      sessionManager.killSession(req.params.id);
-      res.json({ status: 'ok' });
-    } catch (e) {
-      res.status(500).json({ error: 'Failed to kill session' });
-    }
-  });
+  app.use('/api', createApiRouter(sessionManager, logger));
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
@@ -239,46 +100,122 @@ async function startServer() {
   }
 
   const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    logger.info(`Server running on http://localhost:${PORT}`);
   });
 
   // WebSocket Server for Terminal
   const wss = new WebSocketServer({ server, path: '/ws/terminal' });
+  const wsConnections = new Map<string, number>();
 
-  wss.on('connection', (ws) => {
+  const ConnectMsg = z.object({ type: z.literal('connect'), sessionId: z.string().optional() });
+  const DataMsg = z.object({ type: z.literal('data'), payload: z.string() });
+  const ResizeMsg = z.object({
+    type: z.literal('resize'),
+    payload: z.object({ cols: z.number(), rows: z.number() }),
+  });
+  const IncomingMsg = z.discriminatedUnion('type', [ConnectMsg, DataMsg, ResizeMsg]);
+
+  wss.on('connection', (ws, req) => {
+    const ip = req.socket.remoteAddress || 'unknown';
+
+    // VULN 1 FIX part 2: Protect WS connection with Token param
+    try {
+      const urlMatches = req.url?.match(/\\?token=([^&]+)/);
+      const token = urlMatches ? urlMatches[1] : null;
+      if (token !== SECRET_TOKEN) {
+        ws.close(1008, 'Unauthorized');
+        return;
+      }
+    } catch {
+      ws.close(1008, 'Unauthorized');
+      return;
+    }
+
+    // VULN 5 FIX: WS rate limiting per IP
+    const count = wsConnections.get(ip) || 0;
+    if (count >= 5) {
+      ws.close(1008, 'Too many connections from this IP');
+      return;
+    }
+    wsConnections.set(ip, count + 1);
+
+    logger.info({ ip }, 'Authorized WebSocket connection established');
+
+    ws.on('close', () => {
+      wsConnections.set(ip, (wsConnections.get(ip) || 1) - 1);
+    });
+
     let ptyProcess: ChildProcess | null = null;
     let currentSessionId: string | null = null;
+    let bytesReceived = 0;
+
+    // VULN 5 FIX part 3: Rate limit WS data messages by byte
+    const bytesInterval = setInterval(() => {
+      bytesReceived = 0;
+    }, 1000);
 
     ws.on('message', (message) => {
+      const msgBuffer = message as Buffer;
+      // VULN 8 FIX: Message size limit (64KB max)
+      if (msgBuffer.length > 65536) {
+        ws.close(1009, 'Message too large');
+        return;
+      }
+
+      bytesReceived += msgBuffer.length;
+      if (bytesReceived > 10000) {
+        logger.warn({ ip, sessionId: currentSessionId }, 'Rate limit exceeded on WS connection');
+        ws.close(1009, 'Rate limit exceeded');
+        return;
+      }
+
       try {
-        const data = JSON.parse(message.toString());
+        const rawData = JSON.parse(message.toString());
+        const parsed = IncomingMsg.safeParse(rawData);
+
+        if (!parsed.success) {
+          logger.error({ error: parsed.error }, 'Invalid WS message payload');
+          return;
+        }
+
+        const data = parsed.data;
 
         if (data.type === 'connect') {
-          const sessionId = data.sessionId || `session_${Math.random().toString(36).substring(7)}`;
-          currentSessionId = sessionId;
-          
-          ptyProcess = sessionManager.getOrCreateSession(sessionId, ws);
+          // VULN 4 FIX: Support resuming previous verified uuid, else generated securely on server
+          let sessionId = data.sessionId;
 
+          if (
+            !sessionId ||
+            (!sessionManager.hasMemorySession(sessionId) &&
+              !sessionManager.hasTmuxSession(sessionId))
+          ) {
+            sessionId = crypto.randomUUID();
+          }
+
+          currentSessionId = sessionId;
+
+          // VULN 10 FIX: Audit Logging
+          logger.info({ ip, sessionId }, 'User spawned terminal shell');
+
+          ptyProcess = sessionManager.getOrCreateSession(sessionId, ws);
+          // Acknowledge back with the determined session ID
+          ws.send(JSON.stringify({ type: 'session_id', payload: sessionId }));
         } else if (data.type === 'data') {
           if (ptyProcess && ptyProcess.stdin) {
             ptyProcess.stdin.write(Buffer.from(data.payload, 'base64'));
           }
         } else if (data.type === 'resize') {
-          // Resizing a python-spawned PTY is tricky without native bindings,
-          // but we can send the stty command to resize it if needed, or just rely on xterm.js wrapping.
           if (ptyProcess && ptyProcess.stdin) {
-            // Send stty command to resize the terminal
             // ptyProcess.stdin.write(`stty cols ${data.payload.cols} rows ${data.payload.rows}\n`);
           }
         }
       } catch (e) {
-        console.error('WS message error:', e);
+        logger.error({ err: e }, 'WS message error');
       }
     });
 
     ws.on('close', () => {
-      // If using tmux, ptyProcess is just the client, so we can kill it.
-      // The actual shell is running inside the tmux server.
+      clearInterval(bytesInterval);
       if (currentSessionId) {
         const isMemory = sessionManager.hasMemorySession(currentSessionId);
         if (!isMemory && ptyProcess) {
@@ -289,4 +226,7 @@ async function startServer() {
   });
 }
 
-startServer().catch(console.error);
+startServer().catch((err) => {
+  logger.fatal({ err }, 'Failed to start server');
+  process.exit(1);
+});

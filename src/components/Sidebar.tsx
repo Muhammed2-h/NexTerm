@@ -33,7 +33,11 @@ export const Sidebar: React.FC = () => {
             </div>
             Nexus
           </h1>
-          <button onClick={handleNewTerminal} className="w-8 h-8 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-full text-white/70 hover:text-white transition-all border border-white/5 hover:border-white/20 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)]" title="New Terminal">
+          <button
+            onClick={handleNewTerminal}
+            className="w-8 h-8 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-full text-white/70 hover:text-white transition-all border border-white/5 hover:border-white/20 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)]"
+            title="New Terminal"
+          >
             <Plus size={16} />
           </button>
         </div>
@@ -50,10 +54,18 @@ export const Sidebar: React.FC = () => {
             >
               <div className="flex items-center gap-3 truncate">
                 <div className="relative flex items-center justify-center w-3 h-3">
-                  {session.status === 'connected' && <span className="absolute w-full h-full bg-green-400/40 rounded-full animate-ping" />}
-                  <div className={`w-2 h-2 rounded-full relative z-10 ${session.status === 'connected' ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.8)]' : session.status === 'error' ? 'bg-red-500' : session.status === 'connecting' ? 'bg-yellow-400' : 'bg-zinc-600'}`} />
+                  {session.status === 'connected' && (
+                    <span className="absolute w-full h-full bg-green-400/40 rounded-full animate-ping" />
+                  )}
+                  <div
+                    className={`w-2 h-2 rounded-full relative z-10 ${session.status === 'connected' ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.8)]' : session.status === 'error' ? 'bg-red-500' : session.status === 'connecting' ? 'bg-yellow-400' : 'bg-zinc-600'}`}
+                  />
                 </div>
-                <span className={`truncate text-sm font-medium ${activeSessionId === session.id ? 'text-blue-100' : 'text-zinc-400 group-hover:text-zinc-200'}`}>{session.name}</span>
+                <span
+                  className={`truncate text-sm font-medium ${activeSessionId === session.id ? 'text-blue-100' : 'text-zinc-400 group-hover:text-zinc-200'}`}
+                >
+                  {session.name}
+                </span>
               </div>
               <button
                 onClick={(e) => handleRemoveSession(session.id, e)}
@@ -63,19 +75,23 @@ export const Sidebar: React.FC = () => {
               </button>
             </motion.div>
           ))}
-          
+
           {sessions.length === 0 && (
-            <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
               className="text-center text-white/30 text-xs p-6 mt-4 border border-dashed border-white/10 rounded-xl"
             >
-              No active sessions.<br/><br/>Click the + button to initialize.
+              No active sessions.
+              <br />
+              <br />
+              Click the + button to initialize.
             </motion.div>
           )}
         </div>
 
         <div className="p-4 border-t border-white/5 bg-white/5 space-y-2">
-          <button 
+          <button
             onClick={() => setIsCapabilitiesOpen(true)}
             className="flex items-center gap-3 text-sm font-medium text-white/50 hover:text-white transition-colors w-full p-3 hover:bg-white/5 rounded-xl border border-transparent hover:border-white/10"
           >
