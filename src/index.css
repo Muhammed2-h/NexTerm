@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+body {
+  background-color: #050505;
+  background-image: 
+    radial-gradient(circle at 15% 50%, rgba(20, 50, 255, 0.08), transparent 25%),
+    radial-gradient(circle at 85% 30%, rgba(255, 20, 150, 0.08), transparent 25%);
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+  overflow: hidden;
+}
+
+.glass-panel {
+  background: rgba(20, 20, 25, 0.6);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.xterm-viewport {
+  background-color: transparent !important;
+}
+
+.xterm-screen {
+  padding: 8px;
+}
+
+/* CRT Scanline Effect */
+.scanlines {
+  background: linear-gradient(
+    to bottom,
+    rgba(255,255,255,0),
+    rgba(255,255,255,0) 50%,
+    rgba(0,0,0,0.15) 50%,
+    rgba(0,0,0,0.15)
+  );
+  background-size: 100% 4px;
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  opacity: 0.4;
+}
+
+/* Data Receive Pulse Animation */
+@keyframes dataPulse {
+  0% { background-color: rgba(122, 162, 247, 0.08); }
+  100% { background-color: transparent; }
+}
+
+.animate-data-pulse {
+  animation: dataPulse 0.15s ease-out;
+}
