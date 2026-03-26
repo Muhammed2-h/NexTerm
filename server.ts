@@ -1,10 +1,10 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
-import { WebSocketServer, WebSocket } from 'ws';
-import { spawn, execFileSync, ChildProcess } from 'child_process';
+import { WebSocketServer } from 'ws';
+import type { ChildProcess } from 'child_process';
 import path from 'path';
 import cors from 'cors';
-import { detectEnvironment } from './envDetector';
+
 import 'dotenv/config'; // Enable process.env parsing from .env
 import crypto from 'crypto';
 import fs from 'fs';
@@ -94,7 +94,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
@@ -120,8 +120,8 @@ async function startServer() {
 
     // VULN 1 FIX part 2: Protect WS connection with Token param
     try {
-      const urlMatches = req.url?.match(/\\?token=([^&]+)/);
-      const token = urlMatches ? urlMatches[1] : null;
+      const urlObj = new URL(req.url || '', `http://${req.headers.host}`);
+      const token = urlObj.searchParams.get('token');
       if (token !== SECRET_TOKEN) {
         ws.close(1008, 'Unauthorized');
         return;
@@ -141,9 +141,7 @@ async function startServer() {
 
     logger.info({ ip }, 'Authorized WebSocket connection established');
 
-    ws.on('close', () => {
-      wsConnections.set(ip, (wsConnections.get(ip) || 1) - 1);
-    });
+
 
     let ptyProcess: ChildProcess | null = null;
     let currentSessionId: string | null = null;
@@ -201,13 +199,9 @@ async function startServer() {
           // Acknowledge back with the determined session ID
           ws.send(JSON.stringify({ type: 'session_id', payload: sessionId }));
         } else if (data.type === 'data') {
-          if (ptyProcess && ptyProcess.stdin) {
-            ptyProcess.stdin.write(Buffer.from(data.payload, 'base64'));
-          }
+          ptyProcess?.stdin?.write(Buffer.from(data.payload, 'base64'));
         } else if (data.type === 'resize') {
-          if (ptyProcess && ptyProcess.stdin) {
-            // ptyProcess.stdin.write(`stty cols ${data.payload.cols} rows ${data.payload.rows}\n`);
-          }
+          ptyProcess?.stdin?.write(`stty cols ${data.payload.cols} rows ${data.payload.rows}\n`);
         }
       } catch (e) {
         logger.error({ err: e }, 'WS message error');
@@ -215,6 +209,7 @@ async function startServer() {
     });
 
     ws.on('close', () => {
+      wsConnections.set(ip, Math.max(0, (wsConnections.get(ip) || 1) - 1));
       clearInterval(bytesInterval);
       if (currentSessionId) {
         const isMemory = sessionManager.hasMemorySession(currentSessionId);

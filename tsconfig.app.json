@@ -18,5 +18,5 @@
     "exactOptionalPropertyTypes": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src", "envDetector.ts"]
+  "include": ["src"]
 }

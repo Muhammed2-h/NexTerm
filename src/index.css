@@ -32,8 +32,8 @@ body.light-theme {
 
 .glass-panel {
   background: var(--panel-bg-dark);
-  backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
   transition: background 0.3s ease;
 }
 
@@ -47,9 +47,6 @@ body.light-theme .glass-panel {
   background-color: transparent !important;
 }
 
-.xterm-screen {
-  padding: 8px;
-}
 
 /* CRT Scanline Effect */
 .scanlines {
@@ -64,8 +61,8 @@ body.light-theme .glass-panel {
   pointer-events: none;
   position: absolute;
   inset: 0;
-  z-index: 10;
-  opacity: 0.4;
+  z-index: 20;
+  opacity: 0.3;
 }
 
 body.light-theme .scanlines {
@@ -88,6 +85,10 @@ body.light-theme .scanlines {
   }
 }
 
+.animate-data-pulse {
+  animation: dataPulse 0.15s ease-out;
+}
+
 body.light-theme .animate-data-pulse {
   animation: dataPulseLight 0.15s ease-out;
 }
@@ -99,8 +100,4 @@ body.light-theme .animate-data-pulse {
   100% {
     background-color: transparent;
   }
-}
-
-.animate-data-pulse {
-  animation: dataPulse 0.15s ease-out;
 }

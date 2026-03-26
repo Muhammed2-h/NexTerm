@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import { type FC, useEffect, useRef, useCallback } from 'react';
 import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
@@ -11,16 +11,29 @@ interface TerminalProps {
   sessionId: string;
 }
 
-export const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
+export const Terminal: FC<TerminalProps> = ({ sessionId }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const session = useStore((state) => state.sessions.find((s) => s.id === sessionId));
   const updateStatus = useStore((state) => state.updateSessionStatus);
 
-  useEffect(() => {
-    if (!terminalRef.current || !session) return;
+  // Stable callback ref so the effect doesn't re-run when the store selector
+  // produces a new function reference on every render.
+  const updateStatusRef = useRef(updateStatus);
+  updateStatusRef.current = updateStatus;
 
-    // Initialize xterm.js with Tokyo Night inspired high-graphics transparent theme
+  const handleUpdateStatus = useCallback(
+    (id: string, status: Parameters<typeof updateStatus>[1]) => {
+      updateStatusRef.current(id, status);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!terminalRef.current) return;
+
+    // Mark as connecting before the socket even opens
+    handleUpdateStatus(sessionId, 'connecting');
+
     const term = new XTerm({
       cursorBlink: true,
       allowTransparency: true,
@@ -60,6 +73,7 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
     term.loadAddon(searchAddon);
     term.loadAddon(clipboardAddon);
 
+    // Ctrl+F: search terminal buffer
     term.attachCustomKeyEventHandler((e) => {
       if (e.ctrlKey && e.code === 'KeyF' && e.type === 'keydown') {
         e.preventDefault();
@@ -77,13 +91,13 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
     let rafId: number;
     let isDisposed = false;
 
-    // Connect WebSocket
+    // Connect WebSocket — include token from env if available
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/terminal`;
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
-      updateStatus(sessionId, 'connecting');
+      // Connection is now open — send the connect handshake
       ws.send(
         JSON.stringify({
           type: 'connect',
@@ -96,24 +110,32 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
     ws.onmessage = (event) => {
       if (isDisposed) return;
       try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'data') {
-          term.write(atob(data.payload));
+        const data = JSON.parse(event.data as string) as {
+          type: string;
+          payload?: string;
+        };
 
-          // Trigger subtle data pulse animation
+        if (data.type === 'data' && data.payload) {
+          term.write(atob(data.payload));
+          // Subtle data-receive pulse animation
           if (wrapperRef.current) {
             wrapperRef.current.classList.remove('animate-data-pulse');
-            void wrapperRef.current.offsetWidth; // trigger reflow
+            void wrapperRef.current.offsetWidth; // force reflow to restart animation
             wrapperRef.current.classList.add('animate-data-pulse');
           }
         } else if (data.type === 'status') {
-          updateStatus(sessionId, 'connected');
+          handleUpdateStatus(sessionId, 'connected');
           if (data.payload) {
             term.write(`\x1b[32m${data.payload}\x1b[0m`);
           }
         } else if (data.type === 'error') {
-          updateStatus(sessionId, 'error');
-          term.write(`\x1b[31m${data.payload}\x1b[0m`);
+          handleUpdateStatus(sessionId, 'error');
+          if (data.payload) {
+            term.write(`\x1b[31m${data.payload}\x1b[0m`);
+          }
+        } else if (data.type === 'session_id') {
+          // Server confirmed session — mark as connected
+          handleUpdateStatus(sessionId, 'connected');
         }
       } catch (e) {
         console.error('Failed to parse WS message', e);
@@ -122,8 +144,14 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
 
     ws.onclose = () => {
       if (isDisposed) return;
-      updateStatus(sessionId, 'disconnected');
+      handleUpdateStatus(sessionId, 'disconnected');
       term.write('\r\n\x1b[31mConnection closed.\x1b[0m');
+    };
+
+    ws.onerror = () => {
+      if (isDisposed) return;
+      handleUpdateStatus(sessionId, 'error');
+      term.write('\r\n\x1b[31mWebSocket connection failed.\x1b[0m');
     };
 
     term.onData((data) => {
@@ -142,14 +170,14 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
         )
           return;
 
-        // Explicitly check if renderService and dimensions are available before fitting
-        const core = (term as any)._core;
-        if (!core || !core._renderService || !core._renderService.dimensions) return;
+        // Check that xterm's internal renderer is ready before fitting
+        const core = (term as unknown as { _core: { _renderService?: { dimensions?: unknown } } })
+          ._core;
+        if (!core?._renderService?.dimensions) return;
 
         try {
           fitAddon.fit();
-        } catch (e) {
-          // Ignore fit errors if terminal is not fully ready
+        } catch {
           return;
         }
 
@@ -166,38 +194,37 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
       }
     };
 
-    // Use ResizeObserver for instant, delay-free resizing
     const resizeObserver = new ResizeObserver(() => {
-      // Use requestAnimationFrame to ensure DOM is painted before fitting
       if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        handleResize();
-      });
+      rafId = requestAnimationFrame(handleResize);
     });
     resizeObserver.observe(terminalRef.current);
-
     window.addEventListener('resize', handleResize);
+
+    // Initial fit after first paint
+    rafId = requestAnimationFrame(handleResize);
 
     return () => {
       isDisposed = true;
       if (rafId) cancelAnimationFrame(rafId);
       window.removeEventListener('resize', handleResize);
       resizeObserver.disconnect();
-      ws.close();
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
       try {
         term.dispose();
-      } catch (err) {
-        // ignore
+      } catch {
+        // ignore disposal errors
       }
     };
-  }, [sessionId]);
+  }, [sessionId, handleUpdateStatus]);
 
   return (
-    <div
-      ref={wrapperRef}
-      className="absolute inset-0 p-2 overflow-hidden transition-colors duration-300"
-    >
-      <div ref={terminalRef} className="w-full h-full relative z-20" />
+    // Position relative so that the scanlines overlay is contained within this element
+    <div ref={wrapperRef} className="relative w-full h-full overflow-hidden">
+      <div ref={terminalRef} className="absolute inset-0 z-10" />
+      {/* CRT scanline overlay — must be above the terminal canvas */}
       <div className="scanlines" />
     </div>
   );
