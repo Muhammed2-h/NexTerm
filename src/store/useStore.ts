@@ -1,29 +1,5 @@
 import { create } from 'zustand';
 
-export interface EnvironmentCapabilities {
-  osDistro: string;
-  kernelVersion: string;
-  architecture: string;
-  environmentType: 'docker' | 'lxc' | 'k8s' | 'sandbox' | 'baremetal' | 'vps' | 'unknown';
-  isRoot: boolean;
-  hasSystemd: boolean;
-  canUseSystemctl: boolean;
-  hasTunDevice: boolean;
-  canRunTailscale: boolean;
-  canRunDocker: boolean;
-  canInstallPackages: boolean;
-  canRunBackgroundDaemons: boolean;
-  hasIptables: boolean;
-  supportsSshClient: boolean;
-  supportsSshServer: boolean;
-  hasTmux: boolean;
-  hasScreen: boolean;
-  isEphemeral: boolean;
-  isReadOnly: boolean;
-  hasOutboundInternet: boolean;
-  notes: string[];
-}
-
 export interface Session {
   id: string;
   name: string;
@@ -34,22 +10,19 @@ export interface Session {
 interface AppState {
   sessions: Session[];
   activeSessionId: string | null;
-  capabilities: EnvironmentCapabilities | null;
   addSession: (name: string) => void;
   removeSession: (id: string) => void;
   setActiveSession: (id: string) => void;
   updateSessionStatus: (id: string, status: Session['status']) => void;
   appendLog: (id: string, log: string) => void;
-  setCapabilities: (caps: EnvironmentCapabilities) => void;
   setSessions: (sessions: Session[]) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
   sessions: [],
   activeSessionId: null,
-  capabilities: null,
   setSessions: (sessions) =>
-    set({ sessions, activeSessionId: sessions.length > 0 ? sessions[0].id : null }),
+    set({ sessions, activeSessionId: sessions.length > 0 ? sessions[0]?.id || null : null }),
   addSession: (name) =>
     set((state) => {
       const id = Math.random().toString(36).substring(7);
@@ -60,11 +33,18 @@ export const useStore = create<AppState>((set) => ({
       };
     }),
   removeSession: (id) =>
-    set((state) => ({
-      sessions: state.sessions.filter((s) => s.id !== id),
-      activeSessionId:
-        state.activeSessionId === id ? state.sessions[0]?.id || null : state.activeSessionId,
-    })),
+    set((state) => {
+      const remaining = state.sessions.filter((s) => s.id !== id);
+      return {
+        sessions: remaining,
+        activeSessionId:
+          state.activeSessionId === id
+            ? remaining.length > 0
+              ? remaining[0]?.id || null
+              : null
+            : state.activeSessionId,
+      };
+    }),
   setActiveSession: (id) => set({ activeSessionId: id }),
   updateSessionStatus: (id, status) =>
     set((state) => ({
@@ -74,5 +54,4 @@ export const useStore = create<AppState>((set) => ({
     set((state) => ({
       sessions: state.sessions.map((s) => (s.id === id ? { ...s, logs: [...s.logs, log] } : s)),
     })),
-  setCapabilities: (caps) => set({ capabilities: caps }),
 }));

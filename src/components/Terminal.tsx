@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
@@ -74,7 +74,6 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
 
     term.open(terminalRef.current);
 
-    let initTimeout: ReturnType<typeof setTimeout>;
     let rafId: number;
     let isDisposed = false;
 
@@ -162,8 +161,8 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
             }),
           );
         }
-      } catch (e) {
-        console.warn('Resize error', e);
+      } catch (err) {
+        console.warn('Resize error', err);
       }
     };
 
@@ -182,13 +181,12 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
     return () => {
       isDisposed = true;
       if (rafId) cancelAnimationFrame(rafId);
-      clearTimeout(initTimeout);
       window.removeEventListener('resize', handleResize);
       resizeObserver.disconnect();
       ws.close();
       try {
         term.dispose();
-      } catch (e) {
+      } catch (err) {
         // ignore
       }
     };
