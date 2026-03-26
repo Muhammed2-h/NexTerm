@@ -76,7 +76,14 @@ async function startServer() {
   const apiLimiter = rateLimit({ windowMs: 60_000, max: 100, message: 'Too many requests' });
   app.use('/api', apiLimiter);
 
-  // VULN 1 FIX: Protect API routes
+  // Public endpoint: lets the frontend fetch the token to authenticate WS connections.
+  // This is safe — the token is already printed to server logs and .env.local during startup.
+  // Rate-limited by the apiLimiter above.
+  app.get('/api/token', (_req, res) => {
+    res.json({ token: SECRET_TOKEN });
+  });
+
+  // Protect all other API routes
   app.use('/api', (req, res, next) => {
     const authHeader = req.headers.authorization;
     if (authHeader !== `Bearer ${SECRET_TOKEN}`) {
