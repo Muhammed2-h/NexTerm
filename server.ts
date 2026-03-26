@@ -46,17 +46,21 @@ const sessionManager = new SessionManager(logger);
 async function startServer() {
   const app = express();
 
-  // VULN 6 FIX: CSP and Security Headers
+  const isDev = process.env.NODE_ENV !== 'production';
+
+  // Security Headers — strict in production, relaxed in dev (Vite needs inline scripts + HMR WS)
   app.use(
     helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          scriptSrc: ["'self'"],
-          connectSrc: ["'self'", 'ws://localhost:3000', 'wss://localhost:3000'],
-          styleSrc: ["'self'", "'unsafe-inline'"], // xterm.js needs inline styles
-        },
-      },
+      contentSecurityPolicy: isDev
+        ? false // Disable CSP entirely in dev — Vite handles it via its dev server
+        : {
+            directives: {
+              defaultSrc: ["'self'"],
+              scriptSrc: ["'self'"],
+              connectSrc: ["'self'", 'ws:', 'wss:'],
+              styleSrc: ["'self'", "'unsafe-inline'"], // xterm.js needs inline styles
+            },
+          },
     }),
   );
 
