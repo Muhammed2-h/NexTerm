@@ -6,15 +6,18 @@ set -e
 echo "Starting NexTerm build process..."
 
 echo "1/3: Installing dependencies..."
-npm install
+npm ci
 
-echo "2/3: Compiling server (TypeScript) to dist/..."
-# Attempt to compile exactly server.ts, fallback to tsconfig.json with outDir
-npx tsc server.ts --outDir dist --esModuleInterop --skipLibCheck --resolveJsonModule || npx tsc --outDir dist --noEmit false
+echo "2/3: Compiling server (TypeScript) → dist/server/..."
+npm run build:server
 
-echo "3/3: Building frontend (Vite) to dist/..."
-npm run build
+echo "3/3: Building frontend (Vite) → dist/..."
+npm run build:client
 
 echo ""
-echo "Build complete successfully!"
-echo "You can now run the server with: node dist/server.js"
+echo "Build complete!"
+echo "  Server: dist/server/server.js"
+echo "  Client: dist/ (static files)"
+echo ""
+echo "Run with: node dist/server/server.js"
+echo "Or via PM2: pm2 start ecosystem.config.js"

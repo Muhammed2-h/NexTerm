@@ -10,6 +10,11 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    outDir: 'dist/client',
+    emptyOutDir: true,
+  },
+  // dev server proxy is kept for `vite preview` / local dev runs
   server: {
     hmr: true,
     proxy: {
@@ -25,3 +30,4 @@ export default defineConfig({
     },
   },
 });
+

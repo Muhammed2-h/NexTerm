@@ -19,7 +19,7 @@ export function createApiRouter(sessionManager: SessionManager, logger: any) {
 
   router.delete('/sessions/:id', (req, res) => {
     try {
-      sessionManager.killSession(req.params.id);
+      sessionManager.destroySession(req.params['id'] ?? '');
       logger.warn({ id: req.params.id }, 'Session killed via API');
       res.json({ status: 'ok' });
     } catch (_err) {

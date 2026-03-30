@@ -1,8 +1,8 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import { WebSocketServer } from 'ws';
 import path from 'path';
 import cors from 'cors';
+import { fileURLToPath } from 'url';
 
 import 'dotenv/config'; // Enable process.env parsing from .env
 import crypto from 'crypto';
@@ -42,31 +42,29 @@ import { createApiRouter } from './src/routes/api';
 
 const sessionManager = new SessionManager(logger);
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 async function startServer() {
   const app = express();
 
-  const isDev = process.env.NODE_ENV !== 'production';
-
-  // Security Headers — strict in production, relaxed in dev (Vite needs inline scripts + HMR WS)
+  // Security Headers — strict (no Vite HMR needed since we serve pre-built static files)
   app.use(
     helmet({
-      contentSecurityPolicy: isDev
-        ? false // Disable CSP entirely in dev — Vite handles it via its dev server
-        : {
-            directives: {
-              defaultSrc: ["'self'"],
-              scriptSrc: ["'self'"],
-              connectSrc: ["'self'", 'ws:', 'wss:'],
-              styleSrc: ["'self'", "'unsafe-inline'"], // xterm.js needs inline styles
-            },
-          },
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          connectSrc: ["'self'", 'ws:', 'wss:'],
+          styleSrc: ["'self'", "'unsafe-inline'"], // xterm.js needs inline styles
+        },
+      },
     }),
   );
 
   // VULN 3 FIX: Replace open CORS
   app.use(
     cors({
-      origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'],
+      origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
     }),
   );
   app.use(express.json());
@@ -94,20 +92,12 @@ async function startServer() {
   // API routes
   app.use('/api', createApiRouter(sessionManager, logger));
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
+  // Always serve pre-built static files (run `npm run build` before starting)
+  const distPath = path.join(__dirname, '..', 'client');
+  app.use(express.static(distPath));
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
 
   const server = app.listen(PORT, '0.0.0.0', () => {
     logger.info(`Server running on http://localhost:${PORT}`);

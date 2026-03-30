@@ -2,7 +2,8 @@ module.exports = {
   apps: [
     {
       name: 'nexterm',
-      script: 'dist/server.js',
+      script: 'dist/server/server.js',
+      node_args: '--experimental-vm-modules',
       env: {
         NODE_ENV: 'production',
         PORT: 3000,

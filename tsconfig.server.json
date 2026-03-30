@@ -4,12 +4,15 @@
     "module": "ESNext",
     "moduleResolution": "node",
     "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "isolatedModules": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
-    "noEmit": true
+    "noEmit": false,
+    "outDir": "./dist/server",
+    "rootDir": "./"
   },
-  "include": ["server.ts", "src/routes/**/*.ts"]
+  "include": ["server.ts", "src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts", "node_modules", "dist"]
 }

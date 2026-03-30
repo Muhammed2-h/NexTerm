@@ -1,7 +1,7 @@
-# Stage 1: Build
+# ── Stage 1: Build ────────────────────────────────────────────────────────────
 FROM node:20-slim AS builder
 
-# Install build dependencies (node-pty might need python/make/g++)
+# Install build-time native deps (node-pty needs python3/make/g++)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
@@ -11,41 +11,45 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY package*.json ./
+# Install ALL deps (including devDeps) for the build step
 RUN npm ci
 
 COPY . .
 
-# Build Vite frontend and compile TS server
-RUN npm run build
-RUN npx tsc server.ts --outDir dist --esModuleInterop --skipLibCheck --resolveJsonModule || true
-# In case tsc server.ts fails due to config, fallback to default tsc with outDir override
-RUN [ -f dist/server.js ] || npx tsc --outDir dist --noEmit false || true
+# 1) Compile server TypeScript → dist/server/
+RUN npm run build:server
 
-# Stage 2: Runtime
+# 2) Bundle frontend → dist/  (Vite)
+RUN npm run build:client
+
+# ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM node:20-slim
 
-# Install runtime dependencies: tmux and python3
+# Runtime system deps: tmux for shell sessions
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tmux \
-    python3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Create nexterm user and set permissions
+# Create a non-root user
 RUN useradd -m -s /bin/bash nexterm \
     && chown -R nexterm:nexterm /app
 
+# Copy only what's needed to run at runtime:
+#   - compiled server JS
+#   - bundled static frontend
+#   - production node_modules (no Vite/tsx/TypeScript)
 COPY --from=builder --chown=nexterm:nexterm /app/dist ./dist
-COPY --from=builder --chown=nexterm:nexterm /app/node_modules ./node_modules
 COPY --from=builder --chown=nexterm:nexterm /app/package*.json ./
+
+# Install ONLY production deps — skips Vite, tsx, TypeScript, React source, etc.
+RUN npm ci --omit=dev && npm cache clean --force
+
 COPY --from=builder --chown=nexterm:nexterm /app/.env* ./
 
-# Support memory sessions persistence 
+# Persistent session storage dir
 RUN mkdir -p ./sessions && chown -R nexterm:nexterm ./sessions
-
-# Ensure nexterm user owns everything in /app
-RUN chown -R nexterm:nexterm /app
 
 USER nexterm
 
@@ -54,4 +58,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://localhost:3000/api/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
 
-CMD ["node", "dist/server.js"]
+CMD ["node", "dist/server/server.js"]
