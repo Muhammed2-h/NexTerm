@@ -10,8 +10,8 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import pino from 'pino';
 import { z } from 'zod';
-// Setup basic audit logging
-const logger = pino ? pino({ level: 'info' }) : (console as any);
+// Structured logger
+const logger = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 
 // VULN 2 FIX: Terminal running as root
 if (process.getuid && process.getuid() === 0) {
@@ -31,18 +31,19 @@ if (!SECRET_TOKEN) {
   SECRET_TOKEN = crypto.randomBytes(32).toString('hex');
   const envPath = path.join(process.cwd(), '.env.local');
   fs.appendFileSync(envPath, `\nSECRET_TOKEN=${SECRET_TOKEN}\n`);
-  logger.info(`[SECURITY] Generated new SECRET_TOKEN and saved to .env.local: ${SECRET_TOKEN}`);
+  // Log only a safe prefix — never log full secrets
+  logger.info(`[SECURITY] Generated SECRET_TOKEN, saved to .env.local (prefix: ${SECRET_TOKEN.slice(0, 8)}...)`);
 }
 
-const PORT = 3000;
+const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
 import { SessionManager } from './src/sessionManager';
 import { createApiRouter } from './src/routes/api';
 
 const sessionManager = new SessionManager(logger);
 
-// CJS __dirname is available natively in the compiled CommonJS output
-// (TypeScript compiles to CJS via tsconfig.server.json → module: CommonJS)
+// Resolve __dirname safely (works for both dev tsx/ESM and compiled CJS)
+const __dirname = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1'));
 
 async function startServer() {
   const app = express();
@@ -92,11 +93,16 @@ async function startServer() {
   // API routes
   app.use('/api', createApiRouter(sessionManager, logger));
 
-  // Always serve pre-built static files (run `npm run build` before starting)
-  const distPath = path.join(__dirname, '..', 'client');
+  // Serve pre-built frontend (run `npm run build:client` before starting in production)
+  const distPath = path.resolve(process.cwd(), 'dist', 'client');
   app.use(express.static(distPath));
   app.get('*', (_req, res) => {
-    res.sendFile(path.join(distPath, 'index.html'));
+    const indexPath = path.join(distPath, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(503).send('Frontend not built. Run: npm run build:client');
+    }
   });
 
   const server = app.listen(PORT, '0.0.0.0', () => {

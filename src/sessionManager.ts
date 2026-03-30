@@ -1,4 +1,5 @@
 import * as os from 'os';
+import * as fs from 'fs';
 import * as pty from 'node-pty';
 import { WebSocket } from 'ws';
 
@@ -22,7 +23,10 @@ function getShell(): { shell: string; args: string[] } {
   //   NEXTERM_SHELL=/bin/zsh          (Linux/macOS)
   //   NEXTERM_SHELL=cmd.exe           (Windows)
   if (process.env.NEXTERM_SHELL) {
-    return { shell: process.env.NEXTERM_SHELL, args: [] };
+    const shell = process.env.NEXTERM_SHELL;
+    // Keep --login for POSIX shells so .bashrc / .zshrc load correctly
+    const args = os.platform() !== 'win32' && !shell.endsWith('.exe') ? ['--login'] : [];
+    return { shell, args };
   }
 
   // ── Auto-detect ───────────────────────────────────────────────────────────
@@ -33,9 +37,7 @@ function getShell(): { shell: string; args: string[] } {
 
   // Linux / macOS — prefer bash, then the login shell, then sh as final fallback
   const candidates = ['/bin/bash', process.env.SHELL, '/bin/zsh', '/bin/sh'].filter(Boolean) as string[];
-  const shell = candidates.find((s) => {
-    try { return require('fs').existsSync(s); } catch { return false; }
-  }) ?? '/bin/sh';
+  const shell = candidates.find((s) => fs.existsSync(s)) ?? '/bin/sh';
 
   return { shell, args: ['--login'] };
 }
