@@ -1,7 +1,6 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import { WebSocketServer } from 'ws';
-import type { ChildProcess } from 'child_process';
 import path from 'path';
 import cors from 'cors';
 
@@ -152,20 +151,17 @@ async function startServer() {
 
     logger.info({ ip }, 'Authorized WebSocket connection established');
 
-
-
-    let ptyProcess: ChildProcess | null = null;
     let currentSessionId: string | null = null;
     let bytesReceived = 0;
 
-    // VULN 5 FIX part 3: Rate limit WS data messages by byte
+    // Reset byte counter every second (data rate limiting)
     const bytesInterval = setInterval(() => {
       bytesReceived = 0;
     }, 1000);
 
     ws.on('message', (message) => {
       const msgBuffer = message as Buffer;
-      // VULN 8 FIX: Message size limit (64KB max)
+      // Message size limit (64 KB max)
       if (msgBuffer.length > 65536) {
         ws.close(1009, 'Message too large');
         return;
@@ -190,29 +186,28 @@ async function startServer() {
         const data = parsed.data;
 
         if (data.type === 'connect') {
-          // VULN 4 FIX: Support resuming previous verified uuid, else generated securely on server
-          let sessionId = data.sessionId;
-
-          if (
-            !sessionId ||
-            (!sessionManager.hasMemorySession(sessionId) &&
-              !sessionManager.hasTmuxSession(sessionId))
-          ) {
-            sessionId = crypto.randomUUID();
-          }
-
+          // Use provided sessionId to resume, or generate a new one
+          const sessionId = data.sessionId || crypto.randomUUID();
           currentSessionId = sessionId;
 
-          // VULN 10 FIX: Audit Logging
           logger.info({ ip, sessionId }, 'User spawned terminal shell');
-
-          ptyProcess = sessionManager.getOrCreateSession(sessionId, ws);
-          // Acknowledge back with the determined session ID
-          ws.send(JSON.stringify({ type: 'session_id', payload: sessionId }));
+          sessionManager.getOrCreateSession(sessionId, ws);
+          // session_id ack is already sent inside sessionManager
         } else if (data.type === 'data') {
-          ptyProcess?.stdin?.write(Buffer.from(data.payload, 'base64'));
+          if (currentSessionId) {
+            sessionManager.writeToSession(
+              currentSessionId,
+              Buffer.from(data.payload, 'base64').toString(),
+            );
+          }
         } else if (data.type === 'resize') {
-          ptyProcess?.stdin?.write(`stty cols ${data.payload.cols} rows ${data.payload.rows}\n`);
+          if (currentSessionId) {
+            sessionManager.resizeSession(
+              currentSessionId,
+              data.payload.cols,
+              data.payload.rows,
+            );
+          }
         }
       } catch (e) {
         logger.error({ err: e }, 'WS message error');
@@ -222,12 +217,8 @@ async function startServer() {
     ws.on('close', () => {
       wsConnections.set(ip, Math.max(0, (wsConnections.get(ip) || 1) - 1));
       clearInterval(bytesInterval);
-      if (currentSessionId) {
-        const isMemory = sessionManager.hasMemorySession(currentSessionId);
-        if (!isMemory && ptyProcess) {
-          ptyProcess.kill();
-        }
-      }
+      // Sessions persist across reconnects — PTY stays alive
+      // (sessionManager.destroySession only called on explicit disconnect)
     });
   });
 }
