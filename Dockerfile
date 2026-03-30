@@ -1,61 +1,49 @@
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
-FROM node:20-slim AS builder
+FROM node:20-alpine AS builder
 
-# Install build-time native deps (node-pty needs python3/make/g++)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    make \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
+# node-pty needs python3/make/g++ to compile its native bindings
+RUN apk add --no-cache python3 make g++ linux-headers
 
 WORKDIR /app
 
 COPY package*.json ./
-# Install ALL deps (including devDeps) for the build step
 RUN npm ci
 
 COPY . .
 
-# 1) Compile server TypeScript → dist/server/
+# Compile server TypeScript → dist/server/
 RUN npm run build:server
 
-# 2) Bundle frontend → dist/  (Vite)
+# Bundle frontend → dist/ (Vite)
 RUN npm run build:client
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
-FROM node:20-slim
+FROM node:20-alpine
 
-# Runtime system deps: tmux for shell sessions
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    tmux \
-    && rm -rf /var/lib/apt/lists/*
+# bash is the shell NexTerm will spawn for each terminal session
+RUN apk add --no-cache bash
 
 WORKDIR /app
 
-# Create a non-root user
-RUN useradd -m -s /bin/bash nexterm \
+# Non-root user for security
+RUN addgroup -S nexterm && adduser -S -G nexterm -s /bin/bash nexterm \
     && chown -R nexterm:nexterm /app
 
-# Copy only what's needed to run at runtime:
-#   - compiled server JS
-#   - bundled static frontend
-#   - production node_modules (no Vite/tsx/TypeScript)
-COPY --from=builder --chown=nexterm:nexterm /app/dist ./dist
-COPY --from=builder --chown=nexterm:nexterm /app/package*.json ./
-
 # Install ONLY production deps — skips Vite, tsx, TypeScript, React source, etc.
+COPY --chown=nexterm:nexterm package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-COPY --from=builder --chown=nexterm:nexterm /app/.env* ./
-
-# Persistent session storage dir
-RUN mkdir -p ./sessions && chown -R nexterm:nexterm ./sessions
+# Copy compiled output from builder
+COPY --from=builder --chown=nexterm:nexterm /app/dist ./dist
 
 USER nexterm
 
 EXPOSE 3000
 
+ENV NODE_ENV=production \
+    NEXTERM_SHELL=/bin/bash
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "fetch('http://localhost:3000/api/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
+  CMD node -e "fetch('http://localhost:3000/api/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"
 
 CMD ["node", "dist/server/server.js"]

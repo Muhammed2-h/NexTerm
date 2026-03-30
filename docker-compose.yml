@@ -1,15 +1,16 @@
-version: '3.8'
-
 services:
   nexterm:
     build: .
+    image: nexterm:latest
     container_name: nexterm
     restart: unless-stopped
-    env_file: .env
+    env_file:
+      - .env.local
+    environment:
+      - NODE_ENV=production
+      - NEXTERM_SHELL=/bin/bash      # bash runs inside the Alpine container
     ports:
       - '3000:3000'
-    volumes:
-      - ./sessions:/app/sessions
     networks:
       - nexterm_net
 

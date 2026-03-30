@@ -18,24 +18,26 @@ const MAX_HISTORY_BYTES = 1024 * 512; // 512 KB cap
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function getShell(): { shell: string; args: string[] } {
-  // ── User override — easiest for any user ──────────────────────────────────
-  // Set NEXTERM_SHELL in your .env.local to use any shell, e.g.:
-  //   NEXTERM_SHELL=cmd.exe
-  //   NEXTERM_SHELL=pwsh.exe
-  //   NEXTERM_SHELL=/bin/zsh
+  // ── User override — set NEXTERM_SHELL in .env.local ───────────────────────
+  //   NEXTERM_SHELL=/bin/zsh          (Linux/macOS)
+  //   NEXTERM_SHELL=cmd.exe           (Windows)
   if (process.env.NEXTERM_SHELL) {
     return { shell: process.env.NEXTERM_SHELL, args: [] };
   }
 
   // ── Auto-detect ───────────────────────────────────────────────────────────
   if (os.platform() === 'win32') {
-    // Prefer PowerShell 7 (pwsh) if installed, fall back to Windows PowerShell
     const hasPwsh7 = process.env.PSModulePath?.includes('PowerShell\\7');
     return { shell: hasPwsh7 ? 'pwsh.exe' : 'powershell.exe', args: [] };
   }
 
-  // Unix: use the user's login shell, fall back to bash
-  return { shell: process.env.SHELL ?? '/bin/bash', args: ['--login'] };
+  // Linux / macOS — prefer bash, then the login shell, then sh as final fallback
+  const candidates = ['/bin/bash', process.env.SHELL, '/bin/zsh', '/bin/sh'].filter(Boolean) as string[];
+  const shell = candidates.find((s) => {
+    try { return require('fs').existsSync(s); } catch { return false; }
+  }) ?? '/bin/sh';
+
+  return { shell, args: ['--login'] };
 }
 
 
