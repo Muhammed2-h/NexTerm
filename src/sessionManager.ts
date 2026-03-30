@@ -18,14 +18,26 @@ const MAX_HISTORY_BYTES = 1024 * 512; // 512 KB cap
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function getShell(): { shell: string; args: string[] } {
-  if (os.platform() === 'win32') {
-    // Prefer PowerShell 7 (pwsh), fall back to Windows PowerShell, then cmd
-    const pwsh = process.env.PSModulePath?.includes('PowerShell\\7') ? 'pwsh.exe' : null;
-    return { shell: pwsh ?? 'powershell.exe', args: [] };
+  // ── User override — easiest for any user ──────────────────────────────────
+  // Set NEXTERM_SHELL in your .env.local to use any shell, e.g.:
+  //   NEXTERM_SHELL=cmd.exe
+  //   NEXTERM_SHELL=pwsh.exe
+  //   NEXTERM_SHELL=/bin/zsh
+  if (process.env.NEXTERM_SHELL) {
+    return { shell: process.env.NEXTERM_SHELL, args: [] };
   }
-  // Unix: prefer $SHELL, fall back to bash
+
+  // ── Auto-detect ───────────────────────────────────────────────────────────
+  if (os.platform() === 'win32') {
+    // Prefer PowerShell 7 (pwsh) if installed, fall back to Windows PowerShell
+    const hasPwsh7 = process.env.PSModulePath?.includes('PowerShell\\7');
+    return { shell: hasPwsh7 ? 'pwsh.exe' : 'powershell.exe', args: [] };
+  }
+
+  // Unix: use the user's login shell, fall back to bash
   return { shell: process.env.SHELL ?? '/bin/bash', args: ['--login'] };
 }
+
 
 // ── Session Manager ───────────────────────────────────────────────────────────
 
