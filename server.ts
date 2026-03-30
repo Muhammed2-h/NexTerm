@@ -2,7 +2,6 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import path from 'path';
 import cors from 'cors';
-import { fileURLToPath } from 'url';
 
 import 'dotenv/config'; // Enable process.env parsing from .env
 import crypto from 'crypto';
@@ -42,7 +41,8 @@ import { createApiRouter } from './src/routes/api';
 
 const sessionManager = new SessionManager(logger);
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// CJS __dirname is available natively in the compiled CommonJS output
+// (TypeScript compiles to CJS via tsconfig.server.json → module: CommonJS)
 
 async function startServer() {
   const app = express();
