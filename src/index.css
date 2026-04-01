@@ -35,8 +35,8 @@ body.light-theme {
 
 .glass-panel {
   background: var(--panel-bg-dark);
-  -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   transition: background 0.3s ease;
 }
 

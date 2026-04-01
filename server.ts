@@ -143,8 +143,23 @@ async function startServer() {
     }
   });
 
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    logger.info(`Server running on http://localhost:${PORT}`);
+  const HOST = process.env.HOST ?? '127.0.0.1';
+
+  // ── Network Exposure Guard ────────────────────────────────────────────────
+  if (HOST !== '127.0.0.1' && HOST !== 'localhost' && !AUTH_REQUIRED) {
+    if (process.env.ALLOW_UNAUTHENTICATED === 'true') {
+      logger.warn('⚠️ [SECURITY DANGER] Terminal is exposed to the network WITHOUT password protection!');
+    } else {
+      logger.fatal('🚨 [SECURITY FATAL] Refusing to bind to network interface without password protection!');
+      logger.fatal('You are trying to host NexTerm publicly (or on a LAN) without setting a username and password.');
+      logger.fatal('Please set NEXTERM_USER and NEXTERM_PASSWORD in .env.local to secure the terminal.');
+      logger.fatal('If you truly want an open terminal on the network, set ALLOW_UNAUTHENTICATED=true (HIGH RISK).');
+      process.exit(1);
+    }
+  }
+
+  const server = app.listen(PORT, HOST, () => {
+    logger.info(`Server running on http://${HOST}:${PORT}`);
   });
 
   // ── WebSocket Server ──────────────────────────────────────────────────────
