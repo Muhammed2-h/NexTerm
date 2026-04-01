@@ -41,7 +41,8 @@ USER nexterm
 EXPOSE 3000
 
 ENV NODE_ENV=production \
-    NEXTERM_SHELL=/bin/bash
+    NEXTERM_SHELL=/bin/bash \
+    HOST=0.0.0.0
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://localhost:3000/api/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"

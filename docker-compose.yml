@@ -9,6 +9,7 @@ services:
     environment:
       - NODE_ENV=production
       - NEXTERM_SHELL=/bin/bash      # bash runs inside the Alpine container
+      - HOST=0.0.0.0                 # Must bind globally inside container
     ports:
       - '3000:3000'
     networks:
