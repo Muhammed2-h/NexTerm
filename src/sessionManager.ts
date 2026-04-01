@@ -1,5 +1,6 @@
 import * as os from 'os';
 import * as fs from 'fs';
+import * as path from 'path';
 import * as pty from 'node-pty';
 import { WebSocket } from 'ws';
 
@@ -11,6 +12,12 @@ interface Session {
   ws: WebSocket | null;
 }
 
+export interface ILogger {
+  info: (msg: string | object, detail?: string) => void;
+  error: (msg: string | object, detail?: string) => void;
+  warn: (msg: string | object, detail?: string) => void;
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const MAX_HISTORY_CHUNKS = 200;
@@ -20,12 +27,12 @@ const MAX_HISTORY_BYTES = 1024 * 512; // 512 KB cap
 
 function getShell(): { shell: string; args: string[] } {
   // ── User override — set NEXTERM_SHELL in .env.local ───────────────────────
-  //   NEXTERM_SHELL=/bin/zsh          (Linux/macOS)
-  //   NEXTERM_SHELL=cmd.exe           (Windows)
   if (process.env.NEXTERM_SHELL) {
     const shell = process.env.NEXTERM_SHELL;
-    // Keep --login for POSIX shells so .bashrc / .zshrc load correctly
-    const args = os.platform() !== 'win32' && !shell.endsWith('.exe') ? ['--login'] : [];
+    const base = path.basename(shell).replace(/\.exe$/i, '').toLowerCase();
+    // Pass --login for POSIX-style shells so .bashrc / .profile loads
+    const isPosixShell = ['bash', 'zsh', 'sh', 'fish', 'dash'].includes(base);
+    const args = isPosixShell ? ['--login'] : [];
     return { shell, args };
   }
 
@@ -42,14 +49,13 @@ function getShell(): { shell: string; args: string[] } {
   return { shell, args: ['--login'] };
 }
 
-
 // ── Session Manager ───────────────────────────────────────────────────────────
 
 export class SessionManager {
-  private sessions: Map<string, Session> = new Map();
-  private logger: { info: (...args: unknown[]) => void; error: (...args: unknown[]) => void };
+  private sessions = new Map<string, Session>();
+  private logger: ILogger;
 
-  constructor(logger: { info: (...args: unknown[]) => void; error: (...args: unknown[]) => void }) {
+  constructor(logger: ILogger) {
     this.logger = logger;
   }
 
@@ -69,8 +75,8 @@ export class SessionManager {
         }),
       );
 
-      const combined = this.buildHistoryBuffer(existing.history);
-      if (combined.length > 0) {
+      if (existing.history.length > 0) {
+        const combined = Buffer.concat(existing.history);
         ws.send(JSON.stringify({ type: 'data', payload: combined.toString('base64') }));
       }
 
@@ -96,28 +102,35 @@ export class SessionManager {
     session.pty.write(data);
   }
 
-  public destroySession(sessionId: string): void {
+  public destroySession(sessionId: string): boolean {
     const session = this.sessions.get(sessionId);
-    if (!session) return;
+    if (!session) return false;
     try {
       session.pty.kill();
     } catch {
       // already dead
     }
     this.sessions.delete(sessionId);
+    return true;
   }
 
-  public getActiveSessions(): { sessionId: string; pid: number }[] {
-    return Array.from(this.sessions.entries()).map(([sessionId, s]) => ({
-      sessionId,
-      pid: s.pty.pid,
-    }));
+  /**
+   * Returns a list of all current session IDs and their process IDs.
+   */
+  public listActiveSessions(): { sessionId: string; pid: number }[] {
+    const result: { sessionId: string; pid: number }[] = [];
+    for (const [id, session] of this.sessions) {
+      result.push({ sessionId: id, pid: session.pty.pid });
+    }
+    return result;
   }
 
   public shutdown(): void {
-    for (const [id] of this.sessions) {
+    this.logger.info('Shutting down all active PTY sessions...');
+    for (const id of this.sessions.keys()) {
       this.destroySession(id);
     }
+    this.sessions.clear();
   }
 
   // ── Internal ───────────────────────────────────────────────────────────────
@@ -143,17 +156,15 @@ export class SessionManager {
       const chunk = Buffer.from(data);
       this.appendHistory(session, chunk);
 
-      const current = this.sessions.get(sessionId);
-      if (current?.ws && current.ws.readyState === WebSocket.OPEN) {
-        current.ws.send(JSON.stringify({ type: 'data', payload: chunk.toString('base64') }));
+      if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+        session.ws.send(JSON.stringify({ type: 'data', payload: chunk.toString('base64') }));
       }
     });
 
     ptyProcess.onExit(({ exitCode }) => {
       this.logger.info({ sessionId, exitCode }, 'PTY exited');
-      const current = this.sessions.get(sessionId);
-      if (current?.ws && current.ws.readyState === WebSocket.OPEN) {
-        current.ws.send(
+      if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+        session.ws.send(
           JSON.stringify({
             type: 'status',
             payload: `\r\nSession ended (exit ${exitCode ?? 0}). Refresh to start a new one.\r\n`,
@@ -170,20 +181,16 @@ export class SessionManager {
   private appendHistory(session: Session, chunk: Buffer): void {
     session.history.push(chunk);
 
-    // Trim by count
+    // Trim by count first
     while (session.history.length > MAX_HISTORY_CHUNKS) {
       session.history.shift();
     }
 
     // Trim by total byte size
-    let total = session.history.reduce((acc, b) => acc + b.length, 0);
-    while (total > MAX_HISTORY_BYTES && session.history.length > 0) {
-      const removed = session.history.shift();
-      total -= removed?.length ?? 0;
+    let currentTotal = session.history.reduce((acc, b) => acc + b.length, 0);
+    while (currentTotal > MAX_HISTORY_BYTES && session.history.length > 0) {
+      const removed = session.history.shift() as Buffer; // Guaranteed safe by while check
+      currentTotal -= removed.length;
     }
-  }
-
-  private buildHistoryBuffer(history: Buffer[]): Buffer {
-    return history.length > 0 ? Buffer.concat(history) : Buffer.alloc(0);
   }
 }

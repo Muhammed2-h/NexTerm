@@ -3,23 +3,25 @@ import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
 import { SearchAddon } from '@xterm/addon-search';
-import { ClipboardAddon } from '@xterm/addon-clipboard';
 import 'xterm/css/xterm.css';
 import { useStore } from '../store/useStore';
 
 interface TerminalProps {
   sessionId: string;
+  token?: string; // pre-fetched from login; if omitted falls back to GET /api/token
 }
 
-export const Terminal: FC<TerminalProps> = ({ sessionId }) => {
+export const Terminal: FC<TerminalProps> = ({ sessionId, token: preloadedToken }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
-  const wrapperRef = useRef<HTMLDivElement>(null);
   const updateStatus = useStore((state) => state.updateSessionStatus);
 
   // Stable ref so the effect doesn't re-run when the store selector produces
   // a new function reference on every render.
   const updateStatusRef = useRef(updateStatus);
   updateStatusRef.current = updateStatus;
+
+  // Token ref — captured once at mount; never changes, so not a dep of useEffect
+  const tokenRef = useRef(preloadedToken);
 
   const handleUpdateStatus = useCallback(
     (id: string, status: Parameters<typeof updateStatus>[1]) => {
@@ -65,12 +67,10 @@ export const Terminal: FC<TerminalProps> = ({ sessionId }) => {
 
     const fitAddon = new FitAddon();
     const searchAddon = new SearchAddon();
-    const clipboardAddon = new ClipboardAddon();
 
     term.loadAddon(fitAddon);
     term.loadAddon(new WebLinksAddon());
     term.loadAddon(searchAddon);
-    term.loadAddon(clipboardAddon);
 
     // Ctrl+F: inline search
     term.attachCustomKeyEventHandler((e) => {
@@ -87,42 +87,47 @@ export const Terminal: FC<TerminalProps> = ({ sessionId }) => {
 
     let rafId: number;
     let isDisposed = false;
-    // ws may be opened after the async token fetch completes
     let ws: WebSocket | null = null;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 
     const handleResize = () => {
+      if (isDisposed || !terminalRef.current || terminalRef.current.clientWidth === 0 || !term.element)
+        return;
+      
+      // Xterm provides _core for deep access which can be risky; prefer fit() check.
       try {
-        if (isDisposed || !terminalRef.current || terminalRef.current.clientWidth === 0 || !term.element)
-          return;
-        const core = (term as unknown as { _core: { _renderService?: { dimensions?: unknown } } })._core;
-        if (!core?._renderService?.dimensions) return;
-        try {
-          fitAddon.fit();
-        } catch {
-          return;
-        }
-        if (ws && ws.readyState === WebSocket.OPEN && !isDisposed) {
+        fitAddon.fit();
+        if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'resize', payload: { cols: term.cols, rows: term.rows } }));
         }
       } catch (err) {
-        console.warn('Resize error', err);
+        console.warn('Fitting error - typical during rapid resize / tab change:', err);
       }
     };
 
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     const resizeObserver = new ResizeObserver(() => {
       if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(handleResize);
+      // Debounce: prevent fit() → reflow → blink issues by staggering fits.
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        rafId = requestAnimationFrame(handleResize);
+      }, 150);
     });
+
     resizeObserver.observe(terminalRef.current);
     window.addEventListener('resize', handleResize);
+    
     // Initial fit
     rafId = requestAnimationFrame(handleResize);
 
-    // Fetch auth token then open the WebSocket
-    fetch('/api/token')
-      .then((r) => r.json() as Promise<{ token: string }>)
+    // Use pre-loaded token (from login) or fall back to fetching from /api/token
+    const tokenSource = tokenRef.current
+      ? Promise.resolve({ token: tokenRef.current })
+      : (fetch('/api/token').then((r) => r.json()) as Promise<{ token: string }>);
+
+    tokenSource
       .then((data) => {
         if (isDisposed) return;
 
@@ -130,31 +135,19 @@ export const Terminal: FC<TerminalProps> = ({ sessionId }) => {
         ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
-          ws!.send(
-            JSON.stringify({
-              type: 'connect',
-              sessionId: sessionId,
-              payload: { type: 'local' },
-            }),
-          );
+          if (!ws || isDisposed) return;
+          ws.send(JSON.stringify({ type: 'connect', sessionId }));
         };
 
         ws.onmessage = (event) => {
-          if (isDisposed) return;
+          if (isDisposed || typeof event.data !== 'string') return;
           try {
-            const msg = JSON.parse(event.data as string) as { type: string; payload?: string };
+            const msg = JSON.parse(event.data) as { type: string; payload?: string };
             if (msg.type === 'data' && msg.payload) {
               term.write(atob(msg.payload));
-              if (wrapperRef.current) {
-                wrapperRef.current.classList.remove('animate-data-pulse');
-                void wrapperRef.current.offsetWidth;
-                wrapperRef.current.classList.add('animate-data-pulse');
-              }
-            } else if (msg.type === 'status') {
+            } else if (msg.type === 'status' || msg.type === 'session_id') {
               handleUpdateStatus(sessionId, 'connected');
-              if (msg.payload) term.write(`\x1b[32m${msg.payload}\x1b[0m`);
-            } else if (msg.type === 'session_id') {
-              handleUpdateStatus(sessionId, 'connected');
+              if (msg.payload && msg.type === 'status') term.write(`\x1b[32m${msg.payload}\x1b[0m`);
             } else if (msg.type === 'error') {
               handleUpdateStatus(sessionId, 'error');
               if (msg.payload) term.write(`\x1b[31m${msg.payload}\x1b[0m`);
@@ -183,14 +176,15 @@ export const Terminal: FC<TerminalProps> = ({ sessionId }) => {
         });
       })
       .catch((err) => {
-        console.error('Failed to fetch auth token', err);
+        console.error('Failed to authenticate terminal', err);
         handleUpdateStatus(sessionId, 'error');
-        term.write('\r\n\x1b[31mFailed to authenticate with server.\x1b[0m');
+        term.write('\r\n\x1b[31mAuthentication failed.\x1b[0m');
       });
 
     return () => {
       isDisposed = true;
       if (rafId) cancelAnimationFrame(rafId);
+      if (resizeTimer) clearTimeout(resizeTimer);
       window.removeEventListener('resize', handleResize);
       resizeObserver.disconnect();
       if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
@@ -205,10 +199,10 @@ export const Terminal: FC<TerminalProps> = ({ sessionId }) => {
   }, [sessionId, handleUpdateStatus]);
 
   return (
-    <div ref={wrapperRef} className="relative w-full h-full overflow-hidden">
+    <div className="relative w-full h-full overflow-hidden">
       <div ref={terminalRef} className="absolute inset-0 z-10" />
-      {/* CRT scanline overlay */}
-      <div className="scanlines" />
+      {/* CRT scanline overlay effect */}
+      <div className="scanlines pointer-events-none" />
     </div>
   );
 };

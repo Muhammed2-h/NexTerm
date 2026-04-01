@@ -10,18 +10,6 @@ const mockLogger = {
   debug: vi.fn(),
 };
 
-// Test: Session ID sanitisation regex
-// Let's assume the session ID must be alphanumeric and - or _.
-const sanitizeSessionId = (id: string) => id.replace(/[^a-zA-Z0-9-_]/g, '');
-
-describe('Session ID Sanitisation', () => {
-  it('should remove invalid characters from session IDs', () => {
-    expect(sanitizeSessionId('valid-id_123')).toBe('valid-id_123');
-    expect(sanitizeSessionId('invalid!@#$id')).toBe('invalidid');
-    expect(sanitizeSessionId('../../etc/passwd')).toBe('etcpasswd');
-  });
-});
-
 describe('WS message schema validation (Zod)', () => {
   const ConnectMsg = z.object({ type: z.literal('connect'), sessionId: z.string().optional() });
   const DataMsg = z.object({ type: z.literal('data'), payload: z.string() });
@@ -36,8 +24,8 @@ describe('WS message schema validation (Zod)', () => {
     expect(valid.success).toBe(true);
   });
 
-  it('should reject invalid data messages', () => {
-    const invalid = IncomingMsg.safeParse({ type: 'data', payload: 123 }); // payload must be string
+  it('should reject invalid data messages (payload must be string)', () => {
+    const invalid = IncomingMsg.safeParse({ type: 'data', payload: 123 });
     expect(invalid.success).toBe(false);
   });
 
@@ -47,60 +35,56 @@ describe('WS message schema validation (Zod)', () => {
   });
 });
 
-// Mock ChildProcess and execFileSync for the following tests
-vi.mock('child_process', () => {
-  return {
-    execFileSync: vi.fn().mockImplementation((cmd, args) => {
-      if (cmd === 'which' && args[0] === 'tmux') throw new Error('no tmux'); // fake memory mode by default
-      return Buffer.from('');
-    }),
-    spawn: vi.fn().mockReturnValue({
-      stdout: { on: vi.fn() },
-      stderr: { on: vi.fn() },
-      stdin: { write: vi.fn() },
-      on: vi.fn(),
-      kill: vi.fn(),
-    }),
-  };
-});
+// Mock node-pty
+vi.mock('node-pty', () => ({
+  spawn: vi.fn().mockReturnValue({
+    onData: vi.fn(),
+    onExit: vi.fn(),
+    write: vi.fn(),
+    resize: vi.fn(),
+    kill: vi.fn(),
+    pid: 1234,
+  }),
+}));
 
 describe('SessionManager', () => {
   let manager: SessionManager;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     manager = new SessionManager(mockLogger);
   });
 
-  it('getActiveSessions() returns correct format', () => {
-    // Inject a faked session for memory mode
+  it('listActiveSessions() returns sessions in the correct format', () => {
     const fakeWs = { send: vi.fn(), readyState: 1 } as any;
-    manager.getOrCreateSession('test_session-123', fakeWs);
+    manager.getOrCreateSession('test-id-999', fakeWs);
 
-    const active = manager.getActiveSessions();
+    const active = manager.listActiveSessions();
     expect(active.length).toBe(1);
-    expect(active[0]).toHaveProperty('id', 'test_session-123');
-    expect(active[0]).toHaveProperty('name', 'Terminal test_session-123');
+    expect(active[0]).toEqual({
+      sessionId: 'test-id-999',
+      pid: 1234,
+    });
   });
 
-  it('History buffer byte cap handles max chunks and shifts', () => {
+  it('destroySession() removes session from tracking', () => {
     const fakeWs = { send: vi.fn(), readyState: 1 } as any;
-    manager.getOrCreateSession('history_test', fakeWs);
-
-    expect(manager.hasMemorySession('history_test')).toBe(true);
-
-    const chunk = Buffer.from('data');
-    for (let i = 0; i < 110; i++) {
-      // simulate pty giving data - since we mock child process, let's call attachPtyEvents's internal closure or just access the logic
-      // For unit test, we can observe the history limit internally if exposed, but we can't easily access private `sessions` map.
-      // We evaluate behavior: The session history shouldn't exceed 100 chunks.
-    }
-
-    // As it is private, we will mock the buffer behavior via attachPtyEvents explicitly
-    manager.attachPtyEvents(
-      { stdout: { on: vi.fn() }, stderr: { on: vi.fn() }, on: vi.fn() } as any,
-      fakeWs,
-      'history_test',
-      true,
-    );
+    manager.getOrCreateSession('kill-me', fakeWs);
+    
+    expect(manager.listActiveSessions().length).toBe(1);
+    
+    manager.destroySession('kill-me');
+    expect(manager.listActiveSessions().length).toBe(0);
+  });
+  
+  it('shutdown() kills all active sessions', () => {
+    const fakeWs = { send: vi.fn(), readyState: 1 } as any;
+    manager.getOrCreateSession('s1', fakeWs);
+    manager.getOrCreateSession('s2', fakeWs);
+    
+    expect(manager.listActiveSessions().length).toBe(2);
+    
+    manager.shutdown();
+    expect(manager.listActiveSessions().length).toBe(0);
   });
 });

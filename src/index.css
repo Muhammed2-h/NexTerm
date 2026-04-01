@@ -7,6 +7,9 @@
   --text-color-light: #111827;
   --panel-bg-dark: rgba(20, 20, 25, 0.6);
   --panel-bg-light: rgba(255, 255, 255, 0.6);
+  --accent-blue: #7aa2f7;
+  --accent-purple: #bb9af7;
+  --accent-red: #f7768e;
 }
 
 body {
@@ -65,39 +68,44 @@ body.light-theme .glass-panel {
   opacity: 0.3;
 }
 
-body.light-theme .scanlines {
-  background: linear-gradient(
-    to bottom,
-    rgba(0, 0, 0, 0),
-    rgba(0, 0, 0, 0) 50%,
-    rgba(0, 0, 0, 0.05) 50%,
-    rgba(0, 0, 0, 0.05)
-  );
+/* Login Screen Styles */
+
+.login-card {
+  background: rgba(16, 16, 24, 0.85);
+  border: 1px solid rgba(122, 162, 247, 0.18);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow: 0 24px 64px rgba(0,0,0,0.6), 0 0 0 1px rgba(122,162,247,0.08);
 }
 
-/* Data Receive Pulse Animation */
-@keyframes dataPulse {
-  0% {
-    background-color: rgba(122, 162, 247, 0.08);
-  }
-  100% {
-    background-color: transparent;
-  }
+.login-card-shake {
+  animation: loginShake 0.55s ease;
 }
 
-.animate-data-pulse {
-  animation: dataPulse 0.15s ease-out;
+@keyframes loginShake {
+  0%, 100% { transform: translateX(0); }
+  18%       { transform: translateX(-8px); }
+  36%       { transform: translateX(8px); }
+  54%       { transform: translateX(-5px); }
+  72%       { transform: translateX(5px); }
+  90%       { transform: translateX(-2px); }
 }
 
-body.light-theme .animate-data-pulse {
-  animation: dataPulseLight 0.15s ease-out;
+.auth-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(40px);
+  pointer-events: none;
 }
 
-@keyframes dataPulseLight {
-  0% {
-    background-color: rgba(122, 162, 247, 0.15);
-  }
-  100% {
-    background-color: transparent;
-  }
+.input-field {
+  box-sizing: border-box;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(122,162,247,0.2);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.input-field:focus {
+  border-color: rgba(122,162,247,0.6);
 }
