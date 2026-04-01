@@ -56,6 +56,10 @@ const IncomingMsg = z.discriminatedUnion('type', [ConnectMsg, DataMsg, ResizeMsg
 async function startServer() {
   const app = express();
 
+  // ── Proxy Trust (Crucial for Nginx, Cloudflare, Tailscale) ────────────────
+  // This allows correct client IP resolution for rate limiting behind reverse proxies
+  app.set('trust proxy', 1);
+
   // ── Security headers ──────────────────────────────────────────────────────
   app.use(
     helmet({
@@ -71,8 +75,12 @@ async function startServer() {
   );
 
   // ── CORS ─────────────────────────────────────────────────────────────────
-  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') ?? ['http://localhost:3000'];
-  app.use(cors({ origin: allowedOrigins }));
+  const rawOrigins = process.env.ALLOWED_ORIGINS;
+  const corsOptions = rawOrigins === '*' 
+    ? {} // Default allowing all
+    : { origin: rawOrigins?.split(',') ?? ['http://localhost:3000'] };
+  
+  app.use(cors(corsOptions));
   app.use(express.json());
 
   // ── Rate limiting ─────────────────────────────────────────────────────────
@@ -169,11 +177,19 @@ async function startServer() {
   const wsConnections = new Map<string, number>();
 
   wss.on('connection', (ws, req) => {
-    const ip = req.socket.remoteAddress ?? 'unknown';
+    // Resolve real IP behind proxies (Nginx, Cloudflare, Tailscale)
+    const forwardedFor = req.headers['x-forwarded-for'];
+    const ip =
+      (typeof forwardedFor === 'string'
+        ? forwardedFor.split(',')[0]?.trim()
+        : Array.isArray(forwardedFor)
+          ? forwardedFor[0]?.trim()
+          : req.socket.remoteAddress) ?? 'unknown';
 
     // Authenticate via token query param
     try {
-      const url = new URL(req.url ?? '', `http://${req.headers.host}`);
+      const host = req.headers.host ?? 'localhost';
+      const url = new URL(req.url ?? '', `http://${host}`);
       if (url.searchParams.get('token') !== SECRET_TOKEN) {
         ws.close(1008, 'Unauthorized');
         return;
