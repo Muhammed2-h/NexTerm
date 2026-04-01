@@ -85,9 +85,45 @@ export const Terminal: FC<TerminalProps> = ({ sessionId, token: preloadedToken }
 
     term.open(terminalRef.current);
 
+    // ── Terminal Clipboard Behavior (Primary Selection & Mouse Paste) ─────────
+    term.onSelectionChange(() => {
+      const selection = term.getSelection();
+      if (selection && navigator?.clipboard?.writeText) {
+        navigator.clipboard.writeText(selection).catch(() => {
+          // Ignore copy errors (e.g., if used without HTTPS)
+        });
+      }
+    });
+
     let rafId: number;
     let isDisposed = false;
     let ws: WebSocket | null = null;
+
+    const handleMousePaste = (e: MouseEvent) => {
+      // Intercept Middle Click (button === 1) or Right Click (contextmenu)
+      if (e.button === 1 || e.type === 'contextmenu') {
+        e.preventDefault();
+        if (navigator?.clipboard?.readText) {
+          navigator.clipboard
+            .readText()
+            .then((text) => {
+              if (text && ws && ws.readyState === WebSocket.OPEN) {
+                // btoa requires string conversion, but `text` can contain multibyte characters.
+                // standard btoa fails on raw utf-8, so we use encodeURIComponent first as a quick trick,
+                // but the backend expects raw base64. Let's send raw bytes properly.
+                // To be safe with btoa and UTF8:
+                const utf8Bytes = new TextEncoder().encode(text);
+                const binaryString = String.fromCodePoint(...utf8Bytes);
+                ws.send(JSON.stringify({ type: 'data', payload: btoa(binaryString) }));
+              }
+            })
+            .catch((err) => console.warn('Clipboard read error:', err));
+        }
+      }
+    };
+
+    term.element?.addEventListener('contextmenu', handleMousePaste as EventListener);
+    term.element?.addEventListener('auxclick', handleMousePaste as EventListener);
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 
@@ -191,6 +227,8 @@ export const Terminal: FC<TerminalProps> = ({ sessionId, token: preloadedToken }
         ws.close();
       }
       try {
+        term.element?.removeEventListener('contextmenu', handleMousePaste as EventListener);
+        term.element?.removeEventListener('auxclick', handleMousePaste as EventListener);
         term.dispose();
       } catch {
         // ignore disposal errors
